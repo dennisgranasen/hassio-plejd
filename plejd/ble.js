@@ -274,30 +274,36 @@ class PlejdService extends EventEmitter {
       return;
     }
 
-    this.characteristics.auth.write(Buffer.from([0]), false, (err) => {
-      if (err) {
-        console.log('error: failed to authenticate: ' + err);
-        return;
-      }
-
-      self.characteristics.auth.read((err, data) => {
+    try {
+      this.characteristics.auth.write(Buffer.from([0]), false, (err) => {
         if (err) {
-          console.log('error: failed to read auth response: ' + err);
+          console.log('error: failed to authenticate: ' + err);
           return;
         }
 
-        var resp = self._createChallengeResponse(self.cryptoKey, data);
-        self.characteristics.auth.write(resp, false, (err) => {
+        self.characteristics.auth.read((err, data) => {
           if (err) {
-            console.log('error: failed to challenge: ' + err);
+            console.log('error: failed to read auth response: ' + err);
             return;
           }
 
-          self.state = STATE_AUTHENTICATED;
-          self.emit('authenticated');
-        });
-      })
-    });
+          var resp = self._createChallengeResponse(self.cryptoKey, data);
+          self.characteristics.auth.write(resp, false, (err) => {
+            if (err) {
+              console.log('error: failed to challenge: ' + err);
+              return;
+            }
+
+            self.state = STATE_AUTHENTICATED;
+            self.emit('authenticated');
+          });
+        })
+      });
+    }
+    catch (error) {
+      console.log('error: reading/writing to plejd: ' + error);
+      this.onPingFailed(error);
+    }
   }
 
   write(data) {
@@ -307,12 +313,18 @@ class PlejdService extends EventEmitter {
       return false;
     }
 
-    const encryptedData = this._encryptDecrypt(this.cryptoKey, this.deviceAddress, data);
-    this.characteristics.data.write(encryptedData, false);
+    try {
+      const encryptedData = this._encryptDecrypt(this.cryptoKey, this.deviceAddress, data);
+      this.characteristics.data.write(encryptedData, false);
 
-    let writeData;
-    while ((writeData = this.writeQueue.shift()) !== undefined) {
-      this.characteristics.data.write(this._encryptDecrypt(this.cryptoKey, this.deviceAddress, writeData), false);
+      let writeData;
+      while ((writeData = this.writeQueue.shift()) !== undefined) {
+        this.characteristics.data.write(this._encryptDecrypt(this.cryptoKey, this.deviceAddress, writeData), false);
+      }
+    }
+    catch (error) {
+      console.log('error: writing to plejd: ' + error);
+      this.onPingFailed(error);
     }
   }
 
@@ -345,9 +357,9 @@ class PlejdService extends EventEmitter {
   }
 
   onPingFailed(error) {
-    logger('onPingFailed(' + error + ')');
+    console.log('onPingFailed(' + error + ')');
 
-    logger('stopping ping and reconnecting.');
+    console.log('reconnecting to Plejd.');
     clearInterval(this.pingRef);
 
     this.unsubscribeCharacteristics();
